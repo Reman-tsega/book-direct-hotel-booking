@@ -1,6 +1,8 @@
 import express from 'express';
 import bodyParser from 'body-parser';
+import swaggerUi from 'swagger-ui-express';
 import { env } from './config/env';
+import { specs } from './config/swagger';
 import requestId from './middlewares/requestId';
 import errorHandler from './middlewares/errorHandler';
 import routes from './routes';
@@ -11,6 +13,10 @@ const app = express();
 
 app.use(bodyParser.json());
 app.use(requestId as any);
+
+// Swagger documentation
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
+
 app.use(routes);
 
 if (env.METRICS_ENABLED) {
