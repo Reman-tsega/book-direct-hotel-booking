@@ -1,0 +1,49 @@
+{
+  "mappings": [
+    {
+      "request": {
+        "method": "GET",
+        "urlPattern": "/properties.*"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "properties": [
+            {
+              "id": "1",
+              "name": "Hotel Example",
+              "location": "City Center",
+              "price": 150
+            }
+          ]
+        },
+        "fixedDelayMilliseconds": 2000
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "urlPattern": "/properties/.*/rooms"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "rooms": [
+            {
+              "id": "101",
+              "type": "Standard",
+              "price": 150,
+              "available": true
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

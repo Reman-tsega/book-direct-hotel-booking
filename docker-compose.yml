@@ -1,0 +1,11 @@
+services:
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+  mock-openshopping:
+    image: wiremock/wiremock
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./mocks:/home/wiremock
