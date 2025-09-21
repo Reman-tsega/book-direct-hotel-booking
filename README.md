@@ -137,8 +137,8 @@ src/
 
 ## Testing
 
-- Acceptance tests: `npm run test:acceptance` ✅
-- Reliability tests: `npm run test:reliability` ✅
+- Acceptance tests: `npm run test:acceptance` 
+- Reliability tests: `npm run test:reliability` 
 - Load testing: `npm run test:load` (planned)
 
 ### Test Coverage
@@ -164,3 +164,27 @@ src/
 - **Security**: API authentication & authorization
 - **Monitoring**: APM integration (DataDog/New Relic)
 - **Deployment**: Kubernetes manifests
+
+### Development Phases
+
+**Week 1: Core Endpoints**
+-  Property & rooms endpoints
+-  Business rules implementation
+-  Basic error handling
+-  API documentation
+
+**Week 2: Reliability & Observability**
+-  Circuit breaker pattern
+-  Caching with Redis
+-  Prometheus metrics
+-  Structured logging
+-  Comprehensive test suite
+-  Swagger API documentation
+-  Load testing suite
+-  Performance optimization
+
+**Week 3: Production Features** (Planned)
+-  Rate limiting
+-  OpenTelemetry tracing
+-  Multi-supplier support
+-  Advanced caching strategies
