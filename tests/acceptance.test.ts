@@ -60,12 +60,17 @@ describe('Acceptance Tests', () => {
       children: 0
     };
 
-    it('should return 200 for valid rooms request', async () => {
+    it('should return 200 with prices in minor units and X-Currency applied', async () => {
       const { get: cacheGet } = require('../src/services/cacheService');
       cacheGet.mockResolvedValue(null);
       
       mockAxios.get.mockResolvedValueOnce({ 
-        data: { rooms: [{ occupancy: { adults: 2, children: 0 }, price: 100 }] }
+        data: { rooms: [{ 
+          id: '101',
+          occupancy: { adults: 2, children: 0 }, 
+          price: 150,
+          taxes: [{ type: 'city_tax', amount: 5.50 }]
+        }] }
       }).mockResolvedValueOnce({ 
         data: { closed: [] }
       });
@@ -73,11 +78,13 @@ describe('Acceptance Tests', () => {
       const res = await request(app)
         .post('/api/product/v2/hotels/123/get-rooms')
         .set('idempotency-key', 'test-key-123')
-        .set('x-currency', 'USD')
+        .set('x-currency', 'EUR')
         .send(validRoomsRequest);
       
       expect(res.status).toBe(200);
-      expect(res.body.rooms).toBeDefined();
+      expect(res.body.rooms[0].price.amount).toBe(15000); // 150 * 100
+      expect(res.body.rooms[0].price.currency).toBe('EUR');
+      expect(res.body.rooms[0].taxes[0].amount).toBe(550); // 5.50 * 100
     });
 
     it('should return 400 for missing idempotency key', async () => {
@@ -165,36 +172,137 @@ describe('Acceptance Tests', () => {
     });
   });
 
-  describe('Error Handling', () => {
-    it('should return 502 for supplier timeout', async () => {
-      mockAxios.get.mockRejectedValue({ code: 'ECONNABORTED' });
-      
-      const res = await request(app).get('/api/product/v2/hotels/123');
-      
-      expect(res.status).toBe(502);
-      expect(res.body.error.code).toBe('SUPPLIER_TIMEOUT');
-    });
-
-    it('should serve stale data when supplier fails', async () => {
+  describe('Business Rules', () => {
+    it('should filter rooms by exact occupancy matching', async () => {
       const { get: cacheGet } = require('../src/services/cacheService');
-      cacheGet.mockResolvedValueOnce(null)
-           .mockResolvedValueOnce(JSON.stringify({ id: '123', title: 'Stale Hotel' }));
+      cacheGet.mockResolvedValue(null);
       
-      mockAxios.get.mockRejectedValue(new Error('Supplier down'));
+      mockAxios.get.mockResolvedValueOnce({ 
+        data: { rooms: [
+          { id: '101', occupancy: { adults: 2, children: 0 }, price: 150, min_stay_arrival: 1 },
+          { id: '102', occupancy: { adults: 3, children: 1 }, price: 200, min_stay_arrival: 1 }
+        ]}
+      }).mockResolvedValueOnce({ 
+        data: { closed: [] }
+      });
       
-      const res = await request(app).get('/api/product/v2/hotels/123');
+      const res = await request(app)
+        .post('/api/product/v2/hotels/123/get-rooms')
+        .set('idempotency-key', 'occupancy-test')
+        .send({ ...validRoomsRequest, adults: 3, children: 1 });
       
       expect(res.status).toBe(200);
-      expect(res.body.title).toBe('Stale Hotel');
+      expect(res.body.rooms).toHaveLength(1);
+      expect(res.body.rooms[0].id).toBe('102');
+    });
+
+    it('should filter rooms by min_stay requirements', async () => {
+      const { get: cacheGet } = require('../src/services/cacheService');
+      const { calculateLOS } = require('../src/utils/helpers');
+      calculateLOS.mockReturnValue(1); // 1 night stay
+      cacheGet.mockResolvedValue(null);
+      
+      mockAxios.get.mockResolvedValueOnce({ 
+        data: { rooms: [{ 
+          id: '101',
+          occupancy: { adults: 2, children: 0 }, 
+          price: 150,
+          min_stay_arrival: 3 // Requires 3 nights minimum
+        }]}
+      }).mockResolvedValueOnce({ 
+        data: { closed: [] }
+      });
+      
+      const res = await request(app)
+        .post('/api/product/v2/hotels/123/get-rooms')
+        .set('idempotency-key', 'minstay-test')
+        .send(validRoomsRequest);
+      
+      expect(res.status).toBe(200);
+      expect(res.body.rooms).toHaveLength(0); // Filtered out due to min_stay
+    });
+
+    it('should filter rooms by closed_to_arrival dates', async () => {
+      const { get: cacheGet } = require('../src/services/cacheService');
+      cacheGet.mockResolvedValue(null);
+      
+      mockAxios.get.mockResolvedValueOnce({ 
+        data: { rooms: [{ 
+          id: '101',
+          occupancy: { adults: 2, children: 0 }, 
+          price: 150,
+          min_stay_arrival: 1
+        }]}
+      }).mockResolvedValueOnce({ 
+        data: { closed_to_arrival: ['2024-12-25'] }
+      });
+      
+      const res = await request(app)
+        .post('/api/product/v2/hotels/123/get-rooms')
+        .set('idempotency-key', 'closed-arrival-test')
+        .send(validRoomsRequest);
+      
+      expect(res.status).toBe(200);
+      expect(res.body.rooms).toHaveLength(0); // Filtered out due to closed arrival
     });
   });
 
-  describe('Metrics Endpoint', () => {
-    it('should return 404 when metrics disabled or not properly configured', async () => {
-      const res = await request(app).get('/metrics');
+  describe('Stale Cache & Reliability', () => {
+    it('should serve stale cache with Retry-After on supplier timeout', async () => {
+      const { get: cacheGet } = require('../src/services/cacheService');
+      const staleData = { rooms: [{ id: 'stale-room', price: { amount: 10000, currency: 'USD' } }] };
       
-      // Current implementation may not have metrics endpoint properly configured
-      expect([200, 404]).toContain(res.status);
+      cacheGet.mockResolvedValueOnce(null) // Fresh cache miss
+           .mockResolvedValueOnce(JSON.stringify(staleData)); // Stale cache hit
+      
+      mockAxios.get.mockRejectedValue({ code: 'ECONNABORTED' });
+      
+      const res = await request(app)
+        .post('/api/product/v2/hotels/123/get-rooms')
+        .set('idempotency-key', 'stale-test')
+        .send(validRoomsRequest);
+      
+      expect(res.status).toBe(200);
+      expect(res.headers['retry-after']).toBe('60');
+      expect(res.body).toEqual(staleData);
+    });
+
+    it('should return 502 when no stale cache available', async () => {
+      const { get: cacheGet } = require('../src/services/cacheService');
+      cacheGet.mockResolvedValue(null); // No cache available
+      
+      mockAxios.get.mockRejectedValue({ code: 'ECONNABORTED' });
+      
+      const res = await request(app)
+        .post('/api/product/v2/hotels/123/get-rooms')
+        .set('idempotency-key', 'no-stale-test')
+        .send(validRoomsRequest);
+      
+      expect(res.status).toBe(502);
+      expect(res.headers['retry-after']).toBe('60');
+      expect(res.body.error.code).toBe('SUPPLIER_TIMEOUT');
+    });
+  });
+
+  describe('Idempotency', () => {
+    it('should return same response for duplicate idempotency keys', async () => {
+      const { get: cacheGet, set: cacheSet } = require('../src/services/cacheService');
+      const responseData = { rooms: [{ id: '101', price: { amount: 15000, currency: 'USD' } }] };
+      
+      cacheGet.mockResolvedValueOnce(null) // Fresh cache miss
+           .mockResolvedValueOnce(JSON.stringify(responseData)); // Idempotency cache hit
+      
+      const res1 = await request(app)
+        .post('/api/product/v2/hotels/123/get-rooms')
+        .set('idempotency-key', 'duplicate-test')
+        .send(validRoomsRequest);
+      
+      const res2 = await request(app)
+        .post('/api/product/v2/hotels/123/get-rooms')
+        .set('idempotency-key', 'duplicate-test')
+        .send(validRoomsRequest);
+      
+      expect(res1.body).toEqual(res2.body);
     });
   });
 

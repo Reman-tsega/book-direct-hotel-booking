@@ -1,151 +1,182 @@
 import { Request, Response } from 'express';
-import { fetchRooms, fetchClosedDates } from '../services/supplierService';
-import { get as cacheGet, set as cacheSet, acquireLock } from '../services/cacheService';
-import { getRoomsCacheKey, calculateLOS, generateIdemKey } from '../utils/helpers';
+import supplierService from '../services/supplierService';
+import cacheService from '../services/cacheService';
 import logger from '../utils/logger';
+import { getRoomsCacheKey, calculateLOS, generateIdemKey } from '../utils/helpers';
 import { hotelRequestsTotal, hotelResponseDurationSeconds, hotelCacheOperationsTotal } from '../utils/metrics';
-import { env } from '../config/env';
 
 interface RequestWithId extends Request {
   requestId: string;
 }
 
-interface Occupancy {
-  adults?: number;
-  children?: number;
-}
-
-interface Room {
-  occupancy?: Occupancy;
-  min_stay_arrival?: number;
-  min_stay_through?: number;
-  price?: number;
-  currency?: string;
-  taxes?: any[];
-  cancellation_policy?: any;
-}
-
-interface RoomsResponse {
-  rooms: Room[];
-}
+const idempotencyStore = new Map<string, any>();
 
 export const getRooms = async (req: RequestWithId, res: Response) => {
   const { id } = req.params;
-  const { check_in, check_out, adults, children, infants = 0 } = req.body;
-  const idempotencyKey = req.headers['idempotency-key'] as string | undefined;
+  const { check_in, check_out, adults, children = 0, infants = 0 } = req.body;
   const currency = (req.headers['x-currency'] as string) || 'USD';
-  const endpoint = '/api/product/v2/hotels/:id/get-rooms';
+  const idempotencyKey = req.headers['idempotency-key'] as string;
   const start = Date.now();
   let cacheOutcome = 'miss';
   let supplierTimeout = false;
   let statusCode = 200;
-  let data: { rooms: Room[] } | undefined;
-
+  let resultCount = 0;
+  
   if (!idempotencyKey) {
-    return res.status(400).json({ error: { code: 'MISSING_IDEMPOTENCY_KEY', message: 'Idempotency-Key required' } });
+    return res.status(400).json({
+      error: {
+        code: 'MISSING_IDEMPOTENCY_KEY',
+        message: 'Idempotency-Key header is required'
+      }
+    });
+  }
+
+  // Validate date range
+  const los = calculateLOS(check_in, check_out);
+  if (los <= 0) {
+    return res.status(400).json({
+      error: {
+        code: 'INVALID_DATE_RANGE',
+        message: 'Check-out must be after check-in'
+      }
+    });
+  }
+
+  if (los > 30) {
+    return res.status(400).json({
+      error: {
+        code: 'INVALID_DATE_RANGE',
+        message: 'Maximum 30 days advance booking allowed'
+      }
+    });
   }
 
   try {
-    const checkIn = new Date(check_in).toISOString().split('T')[0];
-    const checkOut = new Date(check_out).toISOString().split('T')[0];
-    const los = calculateLOS(checkIn, checkOut);
-
-    if (los <= 0) {
-      statusCode = 400;
-      throw { status: 400, code: 'INVALID_DATE_RANGE', message: 'Invalid date range' };
+    // Check idempotency
+    if (idempotencyStore.has(idempotencyKey)) {
+      logger.info('Idempotent request', { requestId: req.requestId, idempotencyKey });
+      return res.json(idempotencyStore.get(idempotencyKey));
     }
 
-    const idemParams = { id, checkIn, checkOut, adults, children, infants, currency, idempotencyKey };
-    const idemKey = generateIdemKey(idemParams);
-    let existing = await cacheGet(idemKey);
-    if (existing) {
-      return res.json(JSON.parse(existing));
-    }
-
-    const cacheKey = getRoomsCacheKey(id, checkIn, checkOut, adults, children, infants, currency);
-    let cachedData = await cacheGet(cacheKey);
-    if (cachedData) {
-      data = JSON.parse(cachedData);
-      cacheOutcome = 'hit';
+    const cacheKey = getRoomsCacheKey(id, check_in, check_out, adults, children, infants, currency);
+    
+    // Try cache first
+    let cached = await cacheService.get(cacheKey);
+    if (cached) {
+      const data = JSON.parse(cached);
+      resultCount = data.length;
+      logger.info('Cache hit', { 
+        requestId: req.requestId, 
+        propertyId: id, 
+        cacheOutcome: 'hit',
+        dateRange: `${check_in}:${check_out}`,
+        occupancy: `A${adults}-C${children}`,
+        resultCount
+      });
       hotelCacheOperationsTotal.inc({ type: 'read', outcome: 'hit' });
-    } else {
-      const locked = await acquireLock(cacheKey);
-      if (!locked) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        cachedData = await cacheGet(cacheKey);
-        if (cachedData) {
-          cacheOutcome = 'hit_after_lock';
-          hotelCacheOperationsTotal.inc({ type: 'read', outcome: 'hit_after_lock' });
-          data = JSON.parse(cachedData);
+      
+      if (idempotencyKey) {
+        idempotencyStore.set(idempotencyKey, data);
+      }
+      return res.json(data);
+    }
+
+    // Try to acquire lock
+    const lockAcquired = await cacheService.acquireLock(cacheKey);
+    if (!lockAcquired) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      cached = await cacheService.get(cacheKey);
+      if (cached) {
+        const data = JSON.parse(cached);
+        if (idempotencyKey) {
+          idempotencyStore.set(idempotencyKey, data);
         }
+        return res.json(data);
       }
+    }
 
-      if (!data) {
-        const [roomsData, closedData] = await Promise.all([
-          fetchRooms(id, checkIn, checkOut, req.requestId),
-          fetchClosedDates(id, req.requestId),
-        ]) as [RoomsResponse, any];
-
-        const filteredRooms = roomsData.rooms
-          .filter((rate) => {
-            const occ = rate.occupancy || {};
-            return (occ.adults || 0) + (occ.children || 0) === adults + children;
-          })
-          .filter((room) => {
-            const rangeStart = new Date(checkIn);
-            const rangeEnd = new Date(checkOut);
-            for (let d = new Date(rangeStart); d < rangeEnd; d.setUTCDate(d.getUTCDate() + 1)) {
-              const dateStr = d.toISOString().split('T')[0];
-              if (
-                closedData.closed?.includes(dateStr) ||
-                (dateStr === checkIn && closedData.closed_to_arrival?.includes(dateStr)) ||
-                (new Date(d.getTime() + 86400000).toISOString().split('T')[0] === checkOut &&
-                 closedData.closed_to_departure?.includes(dateStr))
-              ) {
-                return false;
-              }
-            }
-            if ((room.min_stay_arrival || 0) > los || (room.min_stay_through || 0) > los) {
-              return false;
-            }
-            return true;
-          })
-          .map((room) => {
-            room.price = Math.round((room.price || 0) * 100);
-            room.currency = currency;
-            room.taxes = room.taxes || [];
-            room.cancellation_policy = room.cancellation_policy || {};
-            return room;
+    try {
+      const rooms = await supplierService.getRooms(id, { 
+        check_in, check_out, adults, children, infants, currency 
+      });
+      
+      resultCount = rooms.length;
+      await cacheService.set(cacheKey, JSON.stringify(rooms));
+      
+      logger.info('Cache rebuild', { 
+        requestId: req.requestId, 
+        propertyId: id, 
+        cacheOutcome: 'rebuild',
+        resultCount,
+        dateRange: `${check_in}:${check_out}`,
+        occupancy: `A${adults}-C${children}`
+      });
+      hotelCacheOperationsTotal.inc({ type: 'write', outcome: 'rebuild' });
+      
+      if (idempotencyKey) {
+        idempotencyStore.set(idempotencyKey, rooms);
+      }
+      
+      res.json(rooms);
+    } catch (error: any) {
+      if (error.code === 'SUPPLIER_TIMEOUT') {
+        const stale = await cacheService.getStale(cacheKey);
+        if (stale) {
+          const staleData = JSON.parse(stale);
+          resultCount = staleData.length;
+          
+          logger.info('Stale cache served due to supplier timeout', { 
+            requestId: req.requestId, 
+            propertyId: id, 
+            cacheOutcome: 'stale_served',
+            supplierTimeout: true,
+            dateRange: `${check_in}:${check_out}`,
+            occupancy: `A${adults}-C${children}`,
+            resultCount
           });
-
-        data = { rooms: filteredRooms };
-        await cacheSet(cacheKey, JSON.stringify(data), env.CACHE_TTL_SECONDS);
-        cacheOutcome = 'rebuild';
+          hotelCacheOperationsTotal.inc({ type: 'read', outcome: 'stale_served' });
+          res.setHeader('Retry-After', '60');
+          
+          if (idempotencyKey) {
+            idempotencyStore.set(idempotencyKey, staleData);
+          }
+          return res.json(staleData);
+        }
+        
+        statusCode = 502;
+        supplierTimeout = true;
+        res.setHeader('Retry-After', '60');
+        return res.status(502).json({
+          error: {
+            code: 'SUPPLIER_TIMEOUT',
+            message: 'Service temporarily unavailable'
+          }
+        });
+      }
+      throw error;
+    } finally {
+      if (lockAcquired) {
+        await cacheService.releaseLock(cacheKey);
       }
     }
-
-    await cacheSet(idemKey, JSON.stringify(data), 3600);
-    res.json(data);
-  } catch (err: any) {
-    supplierTimeout = err.code === 'ECONNABORTED' || err.message.includes('timeout');
-    statusCode = err.status || 502;
-    if (statusCode === 400) {
-      return res.status(400).json({ error: { code: err.code, message: err.message } });
-    } else {
-      const cacheKey = getRoomsCacheKey(id, new Date(check_in).toISOString().split('T')[0], new Date(check_out).toISOString().split('T')[0], adults, children, infants, currency);
-      const stale = await cacheGet(cacheKey);
-      if (stale) {
-        cacheOutcome = 'stale_served';
-        hotelCacheOperationsTotal.inc({ type: 'read', outcome: 'stale_served' });
-        return res.json(JSON.parse(stale));
+  } catch (error: any) {
+    statusCode = 500;
+    logger.error('Rooms controller error', { 
+      error: error.message, 
+      requestId: req.requestId, 
+      propertyId: id 
+    });
+    res.status(500).json({ 
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Internal server error'
       }
-      res.set('Retry-After', '60');
-      res.status(502).json({ error: { code: 'SUPPLIER_TIMEOUT', message: 'Supplier timeout' } });
-    }
+    });
   } finally {
-    hotelRequestsTotal.inc({ endpoint, status_code: statusCode.toString() });
+    hotelRequestsTotal.inc({ endpoint: '/api/product/v2/hotels/:id/get-rooms', status_code: statusCode.toString() });
     hotelResponseDurationSeconds.observe((Date.now() - start) / 1000);
-    logger.info({
+    
+    logger.info('Rooms request completed', {
       timestamp: new Date().toISOString(),
       level: 'info',
       message: 'Rooms request',
@@ -153,12 +184,12 @@ export const getRooms = async (req: RequestWithId, res: Response) => {
       property_id: id,
       date_range: `${check_in} to ${check_out}`,
       occupancy: { adults, children, infants },
-      result_count: data?.rooms.length || 0,
+      result_count: resultCount,
       cache_outcome: cacheOutcome,
       duration_ms: Date.now() - start,
       supplier_timeout: supplierTimeout,
-      endpoint,
-      status_code: statusCode,
+      endpoint: '/api/product/v2/hotels/:id/get-rooms',
+      status_code: statusCode
     });
   }
 };

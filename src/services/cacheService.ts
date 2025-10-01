@@ -1,39 +1,63 @@
-import Redis from 'ioredis';
-import logger from '../utils/logger';
+import { createClient } from 'redis';
 import { env } from '../config/env';
-import { getJitteredTTL } from '../utils/helpers';
-import { hotelCacheOperationsTotal } from '../utils/metrics';
+import logger from '../utils/logger';
+import { addJitter } from '../utils/helpers';
 
-const client = new Redis(env.REDIS_URL);
+class CacheService {
+  private client: any;
 
-client.on('error', (err) => logger.error('Redis Client Error', err));
+  constructor() {
+    this.client = createClient({ url: env.REDIS_URL });
+    this.client.on('error', (err: any) => logger.error('Redis error', { error: err.message }));
+    this.client.connect();
+  }
 
-export async function get(key: string): Promise<string | null> {
-  try {
-    return await client.get(key);
-  } catch (err) {
-    logger.error('Redis get error, bypassing', { err });
-    hotelCacheOperationsTotal.inc({ type: 'read', outcome: 'bypass' });
-    return null;
+  async get(key: string): Promise<string | null> {
+    try {
+      return await this.client.get(key);
+    } catch (error: any) {
+      logger.error('Cache get error', { key, error: error.message });
+      return null;
+    }
+  }
+
+  async getStale(key: string): Promise<string | null> {
+    try {
+      const staleKey = `stale:${key}`;
+      return await this.client.get(staleKey);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  async set(key: string, value: string, ttl: number = env.CACHE_TTL_SECONDS): Promise<void> {
+    try {
+      const jitteredTtl = addJitter(ttl, env.CACHE_JITTER_PERCENT);
+      await this.client.setEx(key, jitteredTtl, value);
+      await this.client.setEx(`stale:${key}`, jitteredTtl * 2, value);
+    } catch (error: any) {
+      logger.error('Cache set error', { key, error: error.message });
+    }
+  }
+
+  async acquireLock(key: string, ttl: number = 30): Promise<boolean> {
+    try {
+      const lockKey = `lock:${key}`;
+      const result = await this.client.set(lockKey, '1', { NX: true, EX: ttl });
+      return result === 'OK';
+    } catch (error) {
+      return false;
+    }
+  }
+
+  async releaseLock(key: string): Promise<void> {
+    try {
+      await this.client.del(`lock:${key}`);
+    } catch (error: any) {
+      logger.error('Cache unlock error', { key, error: error.message });
+    }
   }
 }
 
-export async function set(key: string, value: string, ttl: number): Promise<void> {
-  try {
-    await client.set(key, value, 'EX', getJitteredTTL(ttl));
-    hotelCacheOperationsTotal.inc({ type: 'write', outcome: 'success' });
-  } catch (err) {
-    logger.error('Redis set error', { err });
-  }
-}
-
-export async function acquireLock(key: string, ttl = 10): Promise<boolean> {
-  try {
-    const lockKey = `${key}:lock`;
-    const result = await client.set(lockKey, 'locked', 'EX', ttl, 'NX');
-    return result === 'OK';
-  } catch (err) {
-    logger.error('Redis lock error', { err });
-    return false;
-  }
-}
+export default new CacheService();
+export const { get, set, acquireLock } = new CacheService();

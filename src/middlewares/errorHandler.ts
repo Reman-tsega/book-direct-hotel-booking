@@ -1,24 +1,41 @@
 import { Request, Response, NextFunction } from 'express';
 import logger from '../utils/logger';
 
-interface CustomError extends Error {
-  code?: string;
-  status?: number;
-}
-
 interface RequestWithId extends Request {
   requestId?: string;
 }
 
-const errorHandler = (err: CustomError, req: RequestWithId, res: Response, next: NextFunction) => {
-  const requestId = req.requestId || 'unknown';
-  const code = err.code || 'INTERNAL_ERROR';
-  const status = err.status || 500;
-  const message = err.message || 'Internal server error';
+const errorHandler = (err: any, req: RequestWithId, res: Response, next: NextFunction) => {
+  logger.error('Error occurred', { 
+    error: err.message, 
+    stack: err.stack, 
+    requestId: req.requestId 
+  });
 
-  logger.error('Unhandled error', { error: message, code, status, requestId });
-  
-  res.status(status).json({ error: { code, message } });
+  if (err.code === 'SUPPLIER_TIMEOUT') {
+    return res.status(503).json({ 
+      error: {
+        code: 'SUPPLIER_TIMEOUT',
+        message: 'Service temporarily unavailable'
+      }
+    });
+  }
+
+  if (err.status === 404) {
+    return res.status(404).json({
+      error: {
+        code: 'PROPERTY_NOT_FOUND',
+        message: 'Property not found'
+      }
+    });
+  }
+
+  res.status(500).json({ 
+    error: {
+      code: 'INTERNAL_ERROR',
+      message: 'Internal server error'
+    }
+  });
 };
 
 export default errorHandler;
