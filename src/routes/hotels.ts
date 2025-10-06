@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { getProperty } from '../controllers/propertyController';
+import { getProperty, getPropertyList } from '../controllers/propertyController';
 import { getRooms } from '../controllers/roomsController';
 import { validateRoomsRequest, validateIdempotencyKey } from '../middlewares/validation';
 
@@ -8,6 +8,34 @@ interface RequestWithId extends Request {
 }
 
 const router = Router();
+
+/**
+ * @swagger
+ * /api/product/v2/hotels:
+ *   get:
+ *     summary: Get property list with pagination
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *       - in: header
+ *         name: x-request-id
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Property list with pagination
+ *       502:
+ *         description: Supplier timeout
+ */
+router.get('/', getPropertyList as any);
 
 /**
  * @swagger

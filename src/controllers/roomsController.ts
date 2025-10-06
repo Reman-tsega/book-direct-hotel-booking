@@ -98,7 +98,7 @@ export const getRooms = async (req: RequestWithId, res: Response) => {
     try {
       const rooms = await supplierService.getRooms(id, { 
         check_in, check_out, adults, children, infants, currency 
-      });
+      }, idempotencyKey);
       
       resultCount = rooms.length;
       await cacheService.set(cacheKey, JSON.stringify(rooms));

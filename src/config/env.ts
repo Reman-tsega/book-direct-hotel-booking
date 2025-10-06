@@ -12,5 +12,6 @@ export const env = {
   CACHE_JITTER_PERCENT: parseInt(process.env.CACHE_JITTER_PERCENT || '20'),
   SUPPLIER_TIMEOUT_MS: parseInt(process.env.SUPPLIER_TIMEOUT_MS || '5000'),
   RATE_LIMIT_RPM: parseInt(process.env.RATE_LIMIT_RPM || '60'),
-  METRICS_ENABLED: process.env.METRICS_ENABLED === 'true'
+  METRICS_ENABLED: process.env.METRICS_ENABLED === 'true',
+  USE_MOCK_SUPPLIER: process.env.USE_MOCK_SUPPLIER === 'false'
 };

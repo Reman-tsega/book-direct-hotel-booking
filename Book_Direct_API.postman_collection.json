@@ -1,174 +1,459 @@
 {
   "info": {
-    "name": "Book Direct API",
-    "description": "Hotel booking aggregation service API",
+    "name": "Book Direct - Hotel Booking API",
+    "description": "Comprehensive API collection for testing hotel booking aggregation service",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     {
       "key": "baseUrl",
-      "value": "http://localhost:3000"
+      "value": "http://localhost:3000",
+      "type": "string"
     },
     {
       "key": "propertyId",
-      "value": "123"
+      "value": "7299f84c-dd73-46ce-ae38-3d079de3927f",
+      "type": "string"
     }
   ],
   "item": [
     {
-      "name": "Get Property Information",
-      "request": {
-        "method": "GET",
-        "header": [
-          {
-            "key": "x-currency",
-            "value": "USD"
+      "name": "Properties",
+      "item": [
+        {
+          "name": "Get Property List",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-request-id",
+                "value": "{{$randomUUID}}",
+                "type": "text"
+              },
+              {
+                "key": "x-currency",
+                "value": "USD",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/product/v2/hotels?page=1&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "product", "v2", "hotels"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
           },
-          {
-            "key": "x-request-id",
-            "value": "{{$randomUUID}}"
-          }
-        ],
-        "url": {
-          "raw": "{{baseUrl}}/api/product/v2/hotels/{{propertyId}}",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "product", "v2", "hotels", "{{propertyId}}"]
-        }
-      }
-    },
-    {
-      "name": "Get Available Rooms",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          },
-          {
-            "key": "idempotency-key",
-            "value": "{{$randomUUID}}"
-          },
-          {
-            "key": "x-currency",
-            "value": "EUR"
-          },
-          {
-            "key": "x-request-id",
-            "value": "{{$randomUUID}}"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"check_in\": \"2024-12-25\",\n  \"check_out\": \"2024-12-27\",\n  \"adults\": 2,\n  \"children\": 0,\n  \"infants\": 0\n}"
+          "response": []
         },
-        "url": {
-          "raw": "{{baseUrl}}/api/product/v2/hotels/{{propertyId}}/get-rooms",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "product", "v2", "hotels", "{{propertyId}}", "get-rooms"]
+        {
+          "name": "Get Property Info",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-request-id",
+                "value": "{{$randomUUID}}",
+                "type": "text"
+              },
+              {
+                "key": "x-currency",
+                "value": "USD",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/product/v2/hotels/{{propertyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "product", "v2", "hotels", "{{propertyId}}"]
+            }
+          },
+          "response": [
+            {
+              "name": "Success Response",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/product/v2/hotels/{{propertyId}}",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "product", "v2", "hotels", "{{propertyId}}"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [],
+              "cookie": [],
+              "body": "{\n  \"id\": \"7299f84c-dd73-46ce-ae38-3d079de3927f\",\n  \"title\": \"Walter Test Property\",\n  \"address\": \"Kirova 22, Omsk, 644041, RU\",\n  \"description\": \"Good Hotel!\",\n  \"geo\": {\n    \"lat\": 55.9737982,\n    \"lng\": 73.4765625\n  },\n  \"currency\": \"GBP\",\n  \"email\": \"waltereevan@gmail.com\",\n  \"phone\": \"5557575\",\n  \"facilities\": [],\n  \"photos\": [\n    \"https://ucarecdn.com/72f5cb2a-2558-46e3-b28d-28af75c44cd5/-/format/auto/-/quality/smart/\"\n  ],\n  \"timezone\": \"Asia/Omsk\",\n  \"hotel_policy\": null\n}"
+            }
+          ]
         }
-      }
+      ]
     },
     {
-      "name": "Test: Missing Idempotency Key",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
+      "name": "Rooms",
+      "item": [
+        {
+          "name": "Get Available Rooms",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "idempotency-key",
+                "value": "{{$randomUUID}}",
+                "type": "text"
+              },
+              {
+                "key": "x-currency",
+                "value": "USD",
+                "type": "text"
+              },
+              {
+                "key": "x-request-id",
+                "value": "{{$randomUUID}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"check_in\": \"2024-12-25\",\n  \"check_out\": \"2024-12-27\",\n  \"adults\": 2,\n  \"children\": 0,\n  \"infants\": 0\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/product/v2/hotels/{{propertyId}}/get-rooms",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "product", "v2", "hotels", "{{propertyId}}", "get-rooms"]
+            }
           },
-          {
-            "key": "x-currency",
-            "value": "USD"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"check_in\": \"2024-12-25\",\n  \"check_out\": \"2024-12-27\",\n  \"adults\": 2\n}"
+          "response": [
+            {
+              "name": "Success Response",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"check_in\": \"2024-12-25\",\n  \"check_out\": \"2024-12-27\",\n  \"adults\": 2,\n  \"children\": 0\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/product/v2/hotels/{{propertyId}}/get-rooms",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "product", "v2", "hotels", "{{propertyId}}", "get-rooms"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [],
+              "cookie": [],
+              "body": "[\n  {\n    \"id\": \"101\",\n    \"type\": \"Standard Room\",\n    \"price\": {\n      \"amount\": 15000,\n      \"currency\": \"USD\"\n    },\n    \"occupancy\": {\n      \"adults\": 2,\n      \"children\": 0\n    },\n    \"taxes\": [\n      {\n        \"type\": \"city_tax\",\n        \"amount\": 550\n      }\n    ],\n    \"cancellation_policy\": null\n  }\n]"
+            }
+          ]
         },
-        "url": {
-          "raw": "{{baseUrl}}/api/product/v2/hotels/123/get-rooms",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "product", "v2", "hotels", "123", "get-rooms"]
-        }
-      }
-    },
-    {
-      "name": "Test: Invalid Date Range",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
+        {
+          "name": "Test Idempotency",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "idempotency-key",
+                "value": "test-idempotency-123",
+                "type": "text",
+                "description": "Use same key to test idempotency"
+              },
+              {
+                "key": "x-currency",
+                "value": "USD",
+                "type": "text"
+              },
+              {
+                "key": "x-request-id",
+                "value": "{{$randomUUID}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"check_in\": \"2024-12-25\",\n  \"check_out\": \"2024-12-27\",\n  \"adults\": 2,\n  \"children\": 0\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/product/v2/hotels/{{propertyId}}/get-rooms",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "product", "v2", "hotels", "{{propertyId}}", "get-rooms"]
+            }
           },
-          {
-            "key": "idempotency-key",
-            "value": "test-invalid-dates"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"check_in\": \"2024-12-27\",\n  \"check_out\": \"2024-12-25\",\n  \"adults\": 2\n}"
+          "response": []
         },
-        "url": {
-          "raw": "{{baseUrl}}/api/product/v2/hotels/123/get-rooms",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "product", "v2", "hotels", "123", "get-rooms"]
+        {
+          "name": "Family Room (3 Adults + 1 Child)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "idempotency-key",
+                "value": "{{$randomUUID}}",
+                "type": "text"
+              },
+              {
+                "key": "x-currency",
+                "value": "EUR",
+                "type": "text"
+              },
+              {
+                "key": "x-request-id",
+                "value": "{{$randomUUID}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"check_in\": \"2024-12-28\",\n  \"check_out\": \"2024-12-30\",\n  \"adults\": 3,\n  \"children\": 1,\n  \"infants\": 0\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/product/v2/hotels/{{propertyId}}/get-rooms",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "product", "v2", "hotels", "{{propertyId}}", "get-rooms"]
+            }
+          },
+          "response": []
         }
-      }
+      ]
     },
     {
-      "name": "Test: Idempotency Check",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
+      "name": "Error Scenarios",
+      "item": [
+        {
+          "name": "Invalid Date Range",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "idempotency-key",
+                "value": "{{$randomUUID}}",
+                "type": "text"
+              },
+              {
+                "key": "x-request-id",
+                "value": "{{$randomUUID}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"check_in\": \"2024-12-27\",\n  \"check_out\": \"2024-12-25\",\n  \"adults\": 2\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/product/v2/hotels/{{propertyId}}/get-rooms",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "product", "v2", "hotels", "{{propertyId}}", "get-rooms"]
+            }
           },
-          {
-            "key": "idempotency-key",
-            "value": "idempotency-test-123"
-          },
-          {
-            "key": "x-currency",
-            "value": "USD"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"check_in\": \"2024-12-25\",\n  \"check_out\": \"2024-12-27\",\n  \"adults\": 2\n}"
+          "response": [
+            {
+              "name": "Invalid Date Range Error",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"check_in\": \"2024-12-27\",\n  \"check_out\": \"2024-12-25\",\n  \"adults\": 2\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/product/v2/hotels/{{propertyId}}/get-rooms",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "product", "v2", "hotels", "{{propertyId}}", "get-rooms"]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"INVALID_DATE_RANGE\",\n    \"message\": \"Check-out date must be after check-in date\",\n    \"details\": {\n      \"field\": \"check_out\",\n      \"reason\": \"Check-out date must be after check-in date\"\n    }\n  }\n}"
+            }
+          ]
         },
-        "url": {
-          "raw": "{{baseUrl}}/api/product/v2/hotels/123/get-rooms",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "product", "v2", "hotels", "123", "get-rooms"]
+        {
+          "name": "Missing Idempotency Key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-request-id",
+                "value": "{{$randomUUID}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"check_in\": \"2024-12-25\",\n  \"check_out\": \"2024-12-27\",\n  \"adults\": 2\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/product/v2/hotels/{{propertyId}}/get-rooms",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "product", "v2", "hotels", "{{propertyId}}", "get-rooms"]
+            }
+          },
+          "response": [
+            {
+              "name": "Missing Idempotency Key Error",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"check_in\": \"2024-12-25\",\n  \"check_out\": \"2024-12-27\",\n  \"adults\": 2\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/product/v2/hotels/{{propertyId}}/get-rooms",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "product", "v2", "hotels", "{{propertyId}}", "get-rooms"]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"MISSING_IDEMPOTENCY_KEY\",\n    \"message\": \"Idempotency-Key header is required\",\n    \"details\": {\n      \"field\": \"idempotency-key\",\n      \"reason\": \"Required header missing\"\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Invalid Occupancy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "idempotency-key",
+                "value": "{{$randomUUID}}",
+                "type": "text"
+              },
+              {
+                "key": "x-request-id",
+                "value": "{{$randomUUID}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"check_in\": \"2024-12-25\",\n  \"check_out\": \"2024-12-27\",\n  \"adults\": 10,\n  \"children\": 0\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/product/v2/hotels/{{propertyId}}/get-rooms",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "product", "v2", "hotels", "{{propertyId}}", "get-rooms"]
+            }
+          },
+          "response": []
         }
-      }
+      ]
     },
     {
-      "name": "API Documentation",
-      "request": {
-        "method": "GET",
-        "url": {
-          "raw": "{{baseUrl}}/api-docs",
-          "host": ["{{baseUrl}}"],
-          "path": ["api-docs"]
+      "name": "Monitoring",
+      "item": [
+        {
+          "name": "Get Prometheus Metrics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/metrics",
+              "host": ["{{baseUrl}}"],
+              "path": ["metrics"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "API Documentation",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api-docs",
+              "host": ["{{baseUrl}}"],
+              "path": ["api-docs"]
+            }
+          },
+          "response": []
         }
-      }
+      ]
     },
     {
-      "name": "Metrics",
-      "request": {
-        "method": "GET",
-        "url": {
-          "raw": "{{baseUrl}}/metrics",
-          "host": ["{{baseUrl}}"],
-          "path": ["metrics"]
+      "name": "Testing & Debug",
+      "item": [
+        {
+          "name": "Direct Channex Property Info",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/test/channex/property_info?propertyId={{propertyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["test", "channex", "property_info"],
+              "query": [
+                {
+                  "key": "propertyId",
+                  "value": "{{propertyId}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Direct Channex Property List",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/test/channex/property_list",
+              "host": ["{{baseUrl}}"],
+              "path": ["test", "channex", "property_list"]
+            }
+          },
+          "response": []
         }
-      }
+      ]
     }
   ]
 }

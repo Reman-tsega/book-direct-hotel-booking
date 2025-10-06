@@ -8,7 +8,7 @@ interface RoomsRequest {
   infants?: number;
 }
 
-const validateRoomsData = (data: any): { valid: boolean; error?: string; field?: string } => {
+const validateRoomsData = (data: any): { valid: boolean; error?: string; field?: string; code?: string } => {
   if (!data.check_in || typeof data.check_in !== 'string') {
     return { valid: false, error: 'check_in is required and must be a string', field: 'check_in' };
   }
@@ -42,7 +42,7 @@ const validateRoomsData = (data: any): { valid: boolean; error?: string; field?:
   const checkOut = new Date(data.check_out);
   
   if (checkOut <= checkIn) {
-    return { valid: false, error: 'Check-out date must be after check-in date', field: 'check_out' };
+    return { valid: false, error: 'Check-out date must be after check-in date', field: 'check_out', code: 'INVALID_DATE_RANGE' };
   }
   
   return { valid: true };
@@ -54,7 +54,7 @@ export const validateRoomsRequest = (req: Request, res: Response, next: NextFunc
   if (!validation.valid) {
     return res.status(400).json({
       error: {
-        code: 'VALIDATION_ERROR',
+        code: validation.code || 'VALIDATION_ERROR',
         message: validation.error || 'Invalid request data',
         details: { 
           field: validation.field || 'unknown', 

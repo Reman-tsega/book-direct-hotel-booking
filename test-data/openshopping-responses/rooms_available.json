@@ -1,0 +1,45 @@
+{
+  "rooms": [
+    {
+      "id": "101",
+      "type": "Standard Room",
+      "price": 150.00,
+      "currency": "USD",
+      "occupancy": {
+        "adults": 2,
+        "children": 0
+      },
+      "min_stay_arrival": 1,
+      "min_stay_through": 1,
+      "taxes": [
+        {
+          "type": "city_tax",
+          "amount": 5.50
+        }
+      ],
+      "cancellation_policy": {
+        "free_cancellation_until": "2024-12-24T00:00:00Z",
+        "penalty_after": 100
+      }
+    },
+    {
+      "id": "102",
+      "type": "Deluxe Room",
+      "price": 200.00,
+      "currency": "USD",
+      "occupancy": {
+        "adults": 2,
+        "children": 1
+      },
+      "min_stay_arrival": 2,
+      "min_stay_through": 1,
+      "taxes": [
+        {
+          "type": "city_tax",
+          "amount": 7.50
+        }
+      ],
+      "cancellation_policy": null
+    }
+  ]
+}

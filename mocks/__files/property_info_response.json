@@ -1,0 +1,27 @@
+{
+  "data": {
+    "attributes": {
+      "id": "7299f84c-dd73-46ce-ae38-3d079de3927f",
+      "address": "Kirova 22, Omsk, 644041, RU",
+      "description": "Good Hotel!",
+      "title": "Walter Test Property",
+      "location": {
+        "latitude": "55.9737982",
+        "longitude": "73.4765625"
+      },
+      "currency": "GBP",
+      "email": "waltereevan@gmail.com",
+      "phone": "5557575",
+      "photos": [
+        {
+          "url": "https://ucarecdn.com/72f5cb2a-2558-46e3-b28d-28af75c44cd5/-/format/auto/-/quality/smart/"
+        }
+      ],
+      "facilities": [],
+      "timezone": "Asia/Omsk",
+      "hotel_policy": null
+    },
+    "id": "7299f84c-dd73-46ce-ae38-3d079de3927f",
+    "type": "property_info"
+  }
+}

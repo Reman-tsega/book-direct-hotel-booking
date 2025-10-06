@@ -1,0 +1,14 @@
+{
+  "closed_dates": [
+    {
+      "date": "2024-12-24",
+      "closed_to_arrival": true,
+      "closed_to_departure": false
+    },
+    {
+      "date": "2024-12-31",
+      "closed_to_arrival": false,
+      "closed_to_departure": true
+    }
+  ]
+}

@@ -1,6 +1,10 @@
+import axios from 'axios';
 import { env } from '../config/env';
 import logger from '../utils/logger';
-import { calculateLOS, validateOccupancy, validateAvailability } from '../utils/helpers';
+import { calculateLOS, validateOccupancy, validateAvailability, getPropertyCacheKey, getRoomsCacheKey, generateIdemKey } from '../utils/helpers';
+import cacheService from './cacheService';
+import { createCircuitBreaker } from './circuitBreaker';
+import { hotelCacheOperationsTotal } from '../utils/metrics';
 
 interface Room {
   id: string;
@@ -21,102 +25,359 @@ interface ClosedDate {
 }
 
 class SupplierService {
-  async getPropertyInfo(propertyId: string) {
+  private client = axios.create({
+    baseURL: env.OPENSHOPPING_BASE_URL,
+    timeout: env.SUPPLIER_TIMEOUT_MS,
+    headers: {
+      'Authorization': `Bearer ${env.OPENSHOPPING_API_KEY}`,
+      'Content-Type': 'application/json'
+    }
+  });
+
+  private propertyInfoBreaker = createCircuitBreaker('propertyInfo', this.fetchPropertyInfo.bind(this));
+  private roomsBreaker = createCircuitBreaker('rooms', this.fetchRooms.bind(this));
+  private inFlightRequests = new Map<string, Promise<any>>();
+
+  async getPropertyList(params: { page?: number; limit?: number } = {}) {
+    const { page = 1, limit = 20 } = params;
+    
     try {
-      // Mock data for testing - replace with real API call later
-      logger.info('Fetching property info', { propertyId });
+      logger.info('Fetching property list from API', { page, limit });
+      const response = await this.client.get('/property_list', {
+        params: { page, per_page: limit }
+      });
       
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-      const mockProperty = {
-        id: propertyId,
-        name: "Grand Hotel & Spa",
-        address: "123 Main Street, New York, NY 10001",
-        coordinates: {
-          latitude: 40.7128,
-          longitude: -74.0060
-        },
-        facilities: ["WiFi", "Pool", "Gym", "Spa", "Restaurant"],
-        photos: ["https://example.com/photo1.jpg", "https://example.com/photo2.jpg"],
-        currency: "USD",
-        check_in_time: "15:00",
-        check_out_time: "11:00"
+      return {
+        data: response.data.data.map((item: any) => this.mapPropertyListItem(item.attributes)),
+        pagination: {
+          page,
+          limit,
+          total: response.data.meta?.total || response.data.data.length,
+          has_more: response.data.data.length === limit
+        }
       };
-      
-      return this.mapPropertyInfo(mockProperty);
     } catch (error: any) {
-      logger.error('Supplier service error', { error: error.message, propertyId });
-      const timeoutError = new Error('Supplier timeout');
-      (timeoutError as any).code = 'SUPPLIER_TIMEOUT';
-      throw timeoutError;
+      if (error.code === 'ECONNABORTED') {
+        const timeoutError = new Error('Supplier timeout');
+        (timeoutError as any).code = 'SUPPLIER_TIMEOUT';
+        throw timeoutError;
+      }
+      throw error;
     }
   }
 
-  async getRooms(propertyId: string, params: any) {
-    const { check_in, check_out, adults, children = 0, infants = 0, currency = 'USD' } = params;
+  async getPropertyInfo(propertyId: string) {
+    if (env.USE_MOCK_SUPPLIER) {
+      return this.getMockPropertyInfo(propertyId);
+    }
+
+    const cacheKey = getPropertyCacheKey(propertyId);
+    
+    // Try cache first
+    const cached = await cacheService.get(cacheKey);
+    if (cached) {
+      hotelCacheOperationsTotal.inc({ type: 'read', outcome: 'hit' });
+      return JSON.parse(cached);
+    }
+
+    // Stampede control
+    if (this.inFlightRequests.has(cacheKey)) {
+      return await this.inFlightRequests.get(cacheKey);
+    }
+
+    const lockAcquired = await cacheService.acquireLock(cacheKey);
+    if (!lockAcquired) {
+      // Double-check cache after lock attempt
+      const cachedAfterLock = await cacheService.get(cacheKey);
+      if (cachedAfterLock) {
+        hotelCacheOperationsTotal.inc({ type: 'read', outcome: 'hit' });
+        return JSON.parse(cachedAfterLock);
+      }
+    }
+
+    const request = this.fetchPropertyInfoWithFallback(propertyId, cacheKey);
+    this.inFlightRequests.set(cacheKey, request);
     
     try {
-      logger.info('Fetching rooms', { propertyId, params });
-      
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 150));
-      
-      const mockRooms = [
-        {
-          id: "101",
-          type: "Standard Room",
-          price: 150,
-          currency: "USD",
-          occupancy: { adults: 2, children: 0 },
-          min_stay_arrival: 1,
-          taxes: [{ type: "city_tax", amount: 5.50 }],
-          cancellation_policy: null
-        },
-        {
-          id: "102", 
-          type: "Deluxe Room",
-          price: 200,
-          currency: "USD",
-          occupancy: { adults: 3, children: 1 },
-          min_stay_arrival: 2,
-          taxes: [{ type: "city_tax", amount: 7.50 }],
-          cancellation_policy: null
-        }
-      ];
-      
-      const mockClosedDates = [
-        { date: "2024-12-24", closed_to_arrival: true, closed_to_departure: false },
-        { date: "2024-12-31", closed_to_arrival: false, closed_to_departure: true }
-      ];
-      
-      return this.filterRooms(mockRooms, mockClosedDates, {
-        check_in, check_out, adults, children, infants, currency
-      });
-    } catch (error: any) {
-      logger.error('Supplier service error', { error: error.message, propertyId });
-      const timeoutError = new Error('Supplier timeout');
-      (timeoutError as any).code = 'SUPPLIER_TIMEOUT';
-      throw timeoutError;
+      const result = await request;
+      return result;
+    } finally {
+      this.inFlightRequests.delete(cacheKey);
+      await cacheService.releaseLock(cacheKey);
     }
+  }
+
+  private async fetchPropertyInfoWithFallback(propertyId: string, cacheKey: string) {
+    try {
+      const result = await this.propertyInfoBreaker.fire(propertyId);
+      await cacheService.set(cacheKey, JSON.stringify(result), 86400); // 24h cache
+      hotelCacheOperationsTotal.inc({ type: 'write', outcome: 'success' });
+      return result;
+    } catch (error: any) {
+      // Try stale data
+      const stale = await cacheService.getStale(cacheKey);
+      if (stale) {
+        hotelCacheOperationsTotal.inc({ type: 'read', outcome: 'stale_served' });
+        logger.warn('Serving stale property data', { propertyId, error: error.message });
+        return JSON.parse(stale);
+      }
+      
+      hotelCacheOperationsTotal.inc({ type: 'read', outcome: 'miss' });
+      if (error.code === 'ECONNABORTED') {
+        const timeoutError = new Error('Supplier timeout');
+        (timeoutError as any).code = 'SUPPLIER_TIMEOUT';
+        throw timeoutError;
+      }
+      throw error;
+    }
+  }
+
+  private async fetchPropertyInfo(propertyId: string) {
+    logger.info('Fetching property info from API', { propertyId });
+    const response = await this.client.get(`/${propertyId}`);
+    return this.mapPropertyInfo(response.data.data.attributes);
+  }
+
+  async getRooms(propertyId: string, params: any, idempotencyKey?: string) {
+    if (env.USE_MOCK_SUPPLIER) {
+      return this.getMockRooms(propertyId, params);
+    }
+
+    const { check_in, check_out, adults, children = 0, infants = 0, currency = 'USD' } = params;
+    
+    // Check idempotency first
+    if (idempotencyKey) {
+      const idemKey = generateIdemKey({ ...params, id: propertyId, idempotencyKey });
+      const cached = await cacheService.get(idemKey);
+      if (cached) {
+        hotelCacheOperationsTotal.inc({ type: 'read', outcome: 'idempotent' });
+        return JSON.parse(cached);
+      }
+    }
+
+    const cacheKey = getRoomsCacheKey(propertyId, check_in, check_out, adults, children, infants, currency);
+    
+    // Try cache
+    const cached = await cacheService.get(cacheKey);
+    if (cached) {
+      hotelCacheOperationsTotal.inc({ type: 'read', outcome: 'hit' });
+      const result = JSON.parse(cached);
+      
+      // Store idempotent result
+      if (idempotencyKey) {
+        const idemKey = generateIdemKey({ ...params, id: propertyId, idempotencyKey });
+        await cacheService.set(idemKey, JSON.stringify(result), 3600);
+      }
+      
+      return result;
+    }
+
+    // Stampede control
+    if (this.inFlightRequests.has(cacheKey)) {
+      const result = await this.inFlightRequests.get(cacheKey);
+      
+      if (idempotencyKey) {
+        const idemKey = generateIdemKey({ ...params, id: propertyId, idempotencyKey });
+        await cacheService.set(idemKey, JSON.stringify(result), 3600);
+      }
+      
+      return result;
+    }
+
+    const request = this.fetchRoomsWithFallback(propertyId, params, cacheKey, idempotencyKey);
+    this.inFlightRequests.set(cacheKey, request);
+    
+    try {
+      const result = await request;
+      return result;
+    } finally {
+      this.inFlightRequests.delete(cacheKey);
+    }
+  }
+
+  private async fetchRoomsWithFallback(propertyId: string, params: any, cacheKey: string, idempotencyKey?: string) {
+    try {
+      const result = await this.roomsBreaker.fire(propertyId, params);
+      await cacheService.set(cacheKey, JSON.stringify(result));
+      hotelCacheOperationsTotal.inc({ type: 'write', outcome: 'success' });
+      
+      // Store idempotent result
+      if (idempotencyKey) {
+        const idemKey = generateIdemKey({ ...params, id: propertyId, idempotencyKey });
+        await cacheService.set(idemKey, JSON.stringify(result), 3600);
+      }
+      
+      return result;
+    } catch (error: any) {
+      // Try stale data
+      const stale = await cacheService.getStale(cacheKey);
+      if (stale) {
+        hotelCacheOperationsTotal.inc({ type: 'read', outcome: 'stale_served' });
+        logger.warn('Serving stale rooms data', { propertyId, error: error.message });
+        return JSON.parse(stale);
+      }
+      
+      hotelCacheOperationsTotal.inc({ type: 'read', outcome: 'miss' });
+      if (error.code === 'ECONNABORTED') {
+        const timeoutError = new Error('Supplier timeout');
+        (timeoutError as any).code = 'SUPPLIER_TIMEOUT';
+        throw timeoutError;
+      }
+      throw error;
+    }
+  }
+
+  private async fetchRooms(propertyId: string, params: any) {
+    const { check_in, check_out, adults, children = 0, infants = 0, currency = 'USD' } = params;
+    
+    logger.info('Fetching rooms from API', { propertyId, params });
+    
+    const response = await this.client.get(`/${propertyId}/rooms`, {
+      params: { checkin_date: check_in, checkout_date: check_out }
+    });
+
+    const rooms = response.data.data.map((item: any) => ({
+      id: item.attributes.id,
+      type: item.attributes.title,
+      price: 150,
+      currency: currency,
+      occupancy: { adults, children },
+      rate_plans: item.attributes.rate_plans || []
+    }));
+    
+    return this.filterRooms(rooms, [], {
+      check_in, check_out, adults, children, infants, currency
+    });
+  }
+
+  async getClosedDates(propertyId: string) {
+    if (env.USE_MOCK_SUPPLIER) {
+      return this.getMockClosedDates(propertyId);
+    }
+
+    try {
+      logger.info('Fetching closed dates from API', { propertyId });
+      return [];
+    } catch (error: any) {
+      if (error.code === 'ECONNABORTED') {
+        const timeoutError = new Error('Supplier timeout');
+        (timeoutError as any).code = 'SUPPLIER_TIMEOUT';
+        throw timeoutError;
+      }
+      throw error;
+    }
+  }
+
+  // Mock implementations
+  private async getMockPropertyInfo(propertyId: string) {
+    logger.info('Using mock property info', { propertyId });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    const mockProperty = {
+      id: propertyId,
+      title: "Walter Test Property",
+      address: "Kirova 22, Omsk, 644041, RU",
+      location: {
+        latitude: "55.9737982",
+        longitude: "73.4765625"
+      },
+      facilities: [],
+      photos: [{
+        url: "https://ucarecdn.com/72f5cb2a-2558-46e3-b28d-28af75c44cd5/-/format/auto/-/quality/smart/"
+      }],
+      currency: "GBP",
+      hotel_policy: null
+    };
+    
+    return this.mapPropertyInfo(mockProperty);
+  }
+
+  private async getMockRooms(propertyId: string, params: any) {
+    const { check_in, check_out, adults, children = 0, infants = 0, currency = 'USD' } = params;
+    
+    logger.info('Using mock rooms data', { propertyId, params });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    
+    const mockRooms = [
+      {
+        id: "101",
+        type: "Standard Room",
+        price: 150,
+        currency: "USD",
+        occupancy: { adults: 2, children: 0 },
+        min_stay_arrival: 1,
+        taxes: [{ type: "city_tax", amount: 5.50 }],
+        cancellation_policy: null
+      },
+      {
+        id: "102", 
+        type: "Deluxe Room",
+        price: 200,
+        currency: "USD",
+        occupancy: { adults: 3, children: 1 },
+        min_stay_arrival: 2,
+        taxes: [{ type: "city_tax", amount: 7.50 }],
+        cancellation_policy: null
+      }
+    ];
+    
+    const mockClosedDates = [
+      { date: "2024-12-24", closed_to_arrival: true, closed_to_departure: false },
+      { date: "2024-12-31", closed_to_arrival: false, closed_to_departure: true }
+    ];
+    
+    return this.filterRooms(mockRooms, mockClosedDates, {
+      check_in, check_out, adults, children, infants, currency
+    });
+  }
+
+  private async getMockClosedDates(propertyId: string) {
+    logger.info('Using mock closed dates', { propertyId });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    
+    return [
+      { date: "2024-12-24", closed_to_arrival: true, closed_to_departure: false },
+      { date: "2024-12-31", closed_to_arrival: false, closed_to_departure: true }
+    ];
+  }
+
+  private mapPropertyListItem(data: any) {
+    return {
+      id: data.id,
+      title: data.title,
+      address: data.address,
+      description: data.description,
+      city: data.city,
+      state: data.state,
+      country: data.country,
+      zip_code: data.zip_code,
+      geo: {
+        lat: parseFloat(data.latitude),
+        lng: parseFloat(data.longitude)
+      },
+      photos: data.photos.map((photo: any) => photo.url),
+      timezone: data.timezone,
+      best_offer: data.best_offer
+    };
   }
 
   private mapPropertyInfo(data: any) {
     return {
       id: data.id,
-      name: data.name || null,
-      address: data.address || null,
-      geo: data.coordinates ? {
-        lat: data.coordinates.latitude,
-        lng: data.coordinates.longitude
-      } : null,
-      facilities: data.facilities || [],
-      photos: data.photos || [],
-      hotel_policy: {
-        currency: data.currency || 'USD',
-        check_in: data.check_in_time || null,
-        check_out: data.check_out_time || null
-      }
+      title: data.title,
+      address: data.address,
+      description: data.description,
+      geo: {
+        lat: parseFloat(data.location.latitude),
+        lng: parseFloat(data.location.longitude)
+      },
+      currency: data.currency,
+      email: data.email,
+      phone: data.phone,
+      facilities: data.facilities,
+      photos: data.photos.map((photo: any) => photo.url),
+      timezone: data.timezone,
+      hotel_policy: data.hotel_policy
     };
   }
 
@@ -125,23 +386,19 @@ class SupplierService {
     const los = calculateLOS(check_in, check_out);
     
     return rooms.filter(room => {
-      // Exact occupancy matching
       if (!validateOccupancy(room.occupancy, adults, children)) {
         return false;
       }
-
-      // Availability and restrictions
       if (!validateAvailability(room, closedDates, check_in, check_out, los)) {
         return false;
       }
-
       return true;
     }).map(room => ({
       id: room.id,
       type: room.type,
       price: {
-        amount: Math.round(room.price * 100), // Always minor units
-        currency: currency // Use X-Currency header
+        amount: Math.round(room.price * 100),
+        currency: currency
       },
       occupancy: room.occupancy,
       taxes: (room.taxes || []).map(tax => ({
@@ -154,13 +411,3 @@ class SupplierService {
 }
 
 export default new SupplierService();
-
-// Legacy exports for compatibility
-export const fetchPropertyInfo = (id: string, requestId: string) => 
-  new SupplierService().getPropertyInfo(id);
-
-export const fetchRooms = (id: string, checkIn: string, checkOut: string, requestId: string) => 
-  new SupplierService().getRooms(id, { check_in: checkIn, check_out: checkOut });
-
-export const fetchClosedDates = (id: string, requestId: string) => 
-  Promise.resolve({ closed_dates: [] });

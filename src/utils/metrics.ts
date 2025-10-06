@@ -27,17 +27,21 @@ const hotelResponseDurationSeconds = new promClient.Histogram({
 const supplierRequestsTotal = new promClient.Counter({
   name: 'supplier_requests_total',
   help: 'Supplier requests',
+  labelNames: ['status'],
+  registers: [register]
 });
 
 const supplierLatencySeconds = new promClient.Histogram({
   name: 'supplier_latency_seconds',
   help: 'Supplier latency',
   buckets: [0.1, 0.5, 1, 2, 5],
+  registers: [register]
 });
 
 const circuitStateGauge = new promClient.Gauge({
   name: 'circuit_state',
   help: 'Circuit breaker state (0: closed, 1: open, 2: half-open)',
+  registers: [register]
 });
 
 export {
