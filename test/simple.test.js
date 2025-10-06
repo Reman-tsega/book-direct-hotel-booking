@@ -9,7 +9,8 @@ describe('Basic API Tests', () => {
     process.env.USE_MOCK_SUPPLIER = 'true';
     process.env.LOG_LEVEL = 'error';
     
-    // Import app after setting env vars
+    // Clear require cache and import app after setting env vars
+    delete require.cache[require.resolve('../dist/index.js')];
     const { default: importedApp } = require('../dist/index.js');
     app = importedApp;
   });

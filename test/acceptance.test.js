@@ -1,6 +1,13 @@
 const request = require('supertest');
 const { default: app } = require('../dist/index.js');
 
+// Force mock mode for tests
+process.env.USE_MOCK_SUPPLIER = 'true';
+process.env.LOG_LEVEL = 'error';
+
+// Import app after setting env vars
+delete require.cache[require.resolve('../dist/index.js')];
+
 describe('Hotel Booking API - Acceptance Tests', () => {
   
   describe('Property Info Endpoint', () => {
