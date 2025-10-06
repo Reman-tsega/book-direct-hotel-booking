@@ -9,8 +9,6 @@ interface RequestWithId extends Request {
   requestId: string;
 }
 
-const idempotencyStore = new Map<string, any>();
-
 export const getRooms = async (req: RequestWithId, res: Response) => {
   const { id } = req.params;
   const { check_in, check_out, adults, children = 0, infants = 0 } = req.body;
@@ -52,10 +50,20 @@ export const getRooms = async (req: RequestWithId, res: Response) => {
   }
 
   try {
-    // Check idempotency
-    if (idempotencyStore.has(idempotencyKey)) {
-      logger.info('Idempotent request', { requestId: req.requestId, idempotencyKey });
-      return res.json(idempotencyStore.get(idempotencyKey));
+    // Check Redis-based idempotency
+    const idemKey = generateIdemKey({ ...req.body, id, idempotencyKey });
+    const idempotentResult = await cacheService.get(idemKey);
+    if (idempotentResult) {
+      const data = JSON.parse(idempotentResult);
+      cacheOutcome = 'idempotent';
+      resultCount = data.length;
+      logger.info('Idempotent request served', { 
+        requestId: req.requestId, 
+        idempotencyKey,
+        resultCount
+      });
+      hotelCacheOperationsTotal.inc({ type: 'read', outcome: 'idempotent' });
+      return res.json(data);
     }
 
     const cacheKey = getRoomsCacheKey(id, check_in, check_out, adults, children, infants, currency);
@@ -64,20 +72,19 @@ export const getRooms = async (req: RequestWithId, res: Response) => {
     let cached = await cacheService.get(cacheKey);
     if (cached) {
       const data = JSON.parse(cached);
+      cacheOutcome = 'hit';
       resultCount = data.length;
       logger.info('Cache hit', { 
         requestId: req.requestId, 
         propertyId: id, 
-        cacheOutcome: 'hit',
         dateRange: `${check_in}:${check_out}`,
         occupancy: `A${adults}-C${children}`,
         resultCount
       });
       hotelCacheOperationsTotal.inc({ type: 'read', outcome: 'hit' });
       
-      if (idempotencyKey) {
-        idempotencyStore.set(idempotencyKey, data);
-      }
+      // Store idempotent result in Redis
+      await cacheService.setIdempotent(idemKey, JSON.stringify(data));
       return res.json(data);
     }
 
@@ -88,9 +95,10 @@ export const getRooms = async (req: RequestWithId, res: Response) => {
       cached = await cacheService.get(cacheKey);
       if (cached) {
         const data = JSON.parse(cached);
-        if (idempotencyKey) {
-          idempotencyStore.set(idempotencyKey, data);
-        }
+        cacheOutcome = 'hit';
+        resultCount = data.length;
+        // Store idempotent result in Redis
+        await cacheService.setIdempotent(idemKey, JSON.stringify(data));
         return res.json(data);
       }
     }
@@ -100,22 +108,21 @@ export const getRooms = async (req: RequestWithId, res: Response) => {
         check_in, check_out, adults, children, infants, currency 
       }, idempotencyKey);
       
+      cacheOutcome = 'rebuild';
       resultCount = rooms.length;
       await cacheService.set(cacheKey, JSON.stringify(rooms));
       
       logger.info('Cache rebuild', { 
         requestId: req.requestId, 
         propertyId: id, 
-        cacheOutcome: 'rebuild',
         resultCount,
         dateRange: `${check_in}:${check_out}`,
         occupancy: `A${adults}-C${children}`
       });
       hotelCacheOperationsTotal.inc({ type: 'write', outcome: 'rebuild' });
       
-      if (idempotencyKey) {
-        idempotencyStore.set(idempotencyKey, rooms);
-      }
+      // Store idempotent result in Redis
+      await cacheService.setIdempotent(idemKey, JSON.stringify(rooms));
       
       res.json(rooms);
     } catch (error: any) {
@@ -123,13 +130,13 @@ export const getRooms = async (req: RequestWithId, res: Response) => {
         const stale = await cacheService.getStale(cacheKey);
         if (stale) {
           const staleData = JSON.parse(stale);
+          cacheOutcome = 'stale_served';
           resultCount = staleData.length;
+          supplierTimeout = true;
           
           logger.info('Stale cache served due to supplier timeout', { 
             requestId: req.requestId, 
             propertyId: id, 
-            cacheOutcome: 'stale_served',
-            supplierTimeout: true,
             dateRange: `${check_in}:${check_out}`,
             occupancy: `A${adults}-C${children}`,
             resultCount
@@ -137,9 +144,8 @@ export const getRooms = async (req: RequestWithId, res: Response) => {
           hotelCacheOperationsTotal.inc({ type: 'read', outcome: 'stale_served' });
           res.setHeader('Retry-After', '60');
           
-          if (idempotencyKey) {
-            idempotencyStore.set(idempotencyKey, staleData);
-          }
+          // Store idempotent result in Redis
+          await cacheService.setIdempotent(idemKey, JSON.stringify(staleData));
           return res.json(staleData);
         }
         

@@ -39,7 +39,11 @@ class SupplierService {
   private inFlightRequests = new Map<string, Promise<any>>();
 
   async getPropertyList(params: { page?: number; limit?: number } = {}) {
-    const { page = 1, limit = 20 } = params;
+    const { page = 1, limit = 10 } = params;
+    
+    if (env.USE_MOCK_SUPPLIER) {
+      return this.getMockPropertyList(page, limit);
+    }
     
     try {
       logger.info('Fetching property list from API', { page, limit });
@@ -47,13 +51,16 @@ class SupplierService {
         params: { page, per_page: limit }
       });
       
+      const data = response.data.data.map((item: any) => this.mapPropertyListItem(item.attributes));
+      const total = response.data.meta?.total || data.length;
+      
       return {
-        data: response.data.data.map((item: any) => this.mapPropertyListItem(item.attributes)),
+        data: data.slice(0, limit),
         pagination: {
           page,
           limit,
-          total: response.data.meta?.total || response.data.data.length,
-          has_more: response.data.data.length === limit
+          total,
+          has_more: (page * limit) < total
         }
       };
     } catch (error: any) {
@@ -114,11 +121,24 @@ class SupplierService {
       hotelCacheOperationsTotal.inc({ type: 'write', outcome: 'success' });
       return result;
     } catch (error: any) {
+      // Enhanced error logging with supplier URL and stack
+      logger.error('Supplier API failure', {
+        propertyId,
+        supplierUrl: `${env.OPENSHOPPING_BASE_URL}/${propertyId}`,
+        error: error.message,
+        stack: error.stack,
+        circuitBreakerState: (this.propertyInfoBreaker as any).opened ? 'open' : 'closed'
+      });
+      
       // Try stale data
       const stale = await cacheService.getStale(cacheKey);
       if (stale) {
         hotelCacheOperationsTotal.inc({ type: 'read', outcome: 'stale_served' });
-        logger.warn('Serving stale property data', { propertyId, error: error.message });
+        logger.warn('Serving stale property data', { 
+          propertyId, 
+          error: error.message,
+          staleTtl: 'extended'
+        });
         return JSON.parse(stale);
       }
       
@@ -209,11 +229,25 @@ class SupplierService {
       
       return result;
     } catch (error: any) {
+      // Enhanced error logging with supplier URL and stack
+      logger.error('Supplier API failure', {
+        propertyId,
+        params,
+        supplierUrl: `${env.OPENSHOPPING_BASE_URL}/${propertyId}/rooms`,
+        error: error.message,
+        stack: error.stack,
+        circuitBreakerState: (this.roomsBreaker as any).opened ? 'open' : 'closed'
+      });
+      
       // Try stale data
       const stale = await cacheService.getStale(cacheKey);
       if (stale) {
         hotelCacheOperationsTotal.inc({ type: 'read', outcome: 'stale_served' });
-        logger.warn('Serving stale rooms data', { propertyId, error: error.message });
+        logger.warn('Serving stale rooms data', { 
+          propertyId, 
+          error: error.message,
+          staleTtl: 'extended'
+        });
         return JSON.parse(stale);
       }
       
@@ -339,6 +373,42 @@ class SupplierService {
       { date: "2024-12-24", closed_to_arrival: true, closed_to_departure: false },
       { date: "2024-12-31", closed_to_arrival: false, closed_to_departure: true }
     ];
+  }
+
+  private async getMockPropertyList(page: number, limit: number) {
+    logger.info('Using mock property list', { page, limit });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Generate mock properties
+    const mockProperties = Array.from({ length: 50 }, (_, i) => ({
+      id: `prop-${i + 1}`,
+      title: `Hotel ${i + 1}`,
+      address: `Address ${i + 1}, City, Country`,
+      description: `Description for Hotel ${i + 1}`,
+      city: "Test City",
+      state: "Test State", 
+      country: "Test Country",
+      zip_code: "12345",
+      latitude: "40.7128",
+      longitude: "-74.0060",
+      photos: [{ url: "https://example.com/photo.jpg" }],
+      timezone: "UTC",
+      best_offer: { price: 100 + i }
+    }));
+    
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + limit;
+    const paginatedData = mockProperties.slice(startIndex, endIndex);
+    
+    return {
+      data: paginatedData.map(item => this.mapPropertyListItem(item)),
+      pagination: {
+        page,
+        limit,
+        total: mockProperties.length,
+        has_more: endIndex < mockProperties.length
+      }
+    };
   }
 
   private mapPropertyListItem(data: any) {

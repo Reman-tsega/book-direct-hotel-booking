@@ -1,12 +1,9 @@
-const request = require('supertest');
-const { default: app } = require('../dist/index.js');
-
-// Force mock mode for tests
+// Force mock mode for tests BEFORE any imports
 process.env.USE_MOCK_SUPPLIER = 'true';
 process.env.LOG_LEVEL = 'error';
 
-// Import app after setting env vars
-delete require.cache[require.resolve('../dist/index.js')];
+const request = require('supertest');
+const { default: app } = require('../dist/index.js');
 
 describe('Hotel Booking API - Acceptance Tests', () => {
   

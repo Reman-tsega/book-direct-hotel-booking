@@ -7,6 +7,7 @@ import errorHandler from './middlewares/errorHandler';
 import routes from './routes';
 import { register } from './utils/metrics';
 import logger from './utils/logger';
+import cacheService from './services/cacheService';
 
 const app = express();
 
@@ -31,6 +32,19 @@ if (env.METRICS_ENABLED) {
 }
 
 app.use(errorHandler);
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  logger.info('SIGTERM received, shutting down gracefully');
+  await cacheService.cleanup();
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  logger.info('SIGINT received, shutting down gracefully');
+  await cacheService.cleanup();
+  process.exit(0);
+});
 
 if (process.env.NODE_ENV !== 'test') {
   app.listen(env.PORT, () => logger.info(`Server running on port ${env.PORT}`));

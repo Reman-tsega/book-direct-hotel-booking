@@ -12,7 +12,7 @@ build/
 
 # Logs
 *.log
-logs/
+logs/*.log
 
 # Runtime data
 pids/

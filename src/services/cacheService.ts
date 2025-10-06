@@ -57,7 +57,22 @@ class CacheService {
       logger.error('Cache unlock error', { key, error: error.message });
     }
   }
+
+  async setIdempotent(key: string, value: string, ttl: number = 3600): Promise<void> {
+    try {
+      await this.client.setEx(key, ttl, value);
+    } catch (error: any) {
+      logger.error('Idempotency cache set error', { key, error: error.message });
+    }
+  }
+
+  async cleanup(): Promise<void> {
+    try {
+      await this.client.quit();
+    } catch (error: any) {
+      logger.error('Redis cleanup error', { error: error.message });
+    }
+  }
 }
 
 export default new CacheService();
-export const { get, set, acquireLock } = new CacheService();

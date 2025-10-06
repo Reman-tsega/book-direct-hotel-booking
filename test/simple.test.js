@@ -1,18 +1,16 @@
+// Force mock mode for tests BEFORE any imports
+process.env.USE_MOCK_SUPPLIER = 'true';
+process.env.LOG_LEVEL = 'error';
+process.env.NODE_ENV = 'test';
+
 const request = require('supertest');
+const { default: app } = require('../dist/index.js');
 
 // Simple test without complex setup
 describe('Basic API Tests', () => {
-  let app;
   
   beforeAll(() => {
-    process.env.NODE_ENV = 'test';
-    process.env.USE_MOCK_SUPPLIER = 'true';
-    process.env.LOG_LEVEL = 'error';
-    
-    // Clear require cache and import app after setting env vars
-    delete require.cache[require.resolve('../dist/index.js')];
-    const { default: importedApp } = require('../dist/index.js');
-    app = importedApp;
+    // Environment variables already set before imports
   });
 
   test('GET /metrics should return metrics', async () => {
